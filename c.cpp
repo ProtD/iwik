@@ -440,7 +440,7 @@ public:
   // nahrazeni i mestem j (ze stejneho regionu)
   inline void brother_opt(int i, int j);
   inline int price_after_brother_opt(int i, int j, int current_price);
-  int best_brother(int p = 0);
+  int best_brother_opt(int p = 0);
 
   // rotace useku mezi i a j, predpoklada i < j
   inline void two_opt(int i1, int j2);
@@ -454,6 +454,8 @@ public:
   inline int price_after_three_opt(int which, int i1, int i2, int i3, int current_price, int max);
   int best_three_opt(int proximity, int p = 0);
   int gd_three_opt(int proximity, int p = 0);
+
+  int gd_all(int p = 0);
 };
   
 Route *result_route = NULL;
@@ -501,6 +503,7 @@ void Route::random_init() {
   }
 }
 
+// todo: neumi vic koncovych mest!
 // greedy inicializace -- pridava na jeden z koncu vzdy nejlevnejsi usek
 // forward = pridava na konec, backward = pridava na zacatek, muze byt zapnute oboje
 // anti = cesta, ktere by to melo byt pokud mozno nepodobne
@@ -676,7 +679,7 @@ int Route::price_after_brother_opt(int i, int j, int current_price) {
   return result;  
 }
 
-int Route::best_brother(int p) {
+int Route::best_brother_opt(int p) {
   Route minr = Route();
   if (p == 0)
     p = price();
@@ -877,6 +880,43 @@ int Route::gd_three_opt(int proximity, int p) {
   do {
     prevp = p;
     p = best_three_opt(proximity, p);
+  } while (p < prevp && !hard_limit_passed());
+  return p;
+}
+
+int Route::gd_all(int p) {
+  if (p == 0)
+    p = price();
+  int prevp, minp, p2;
+  Route r2;
+  Route minr;
+  do {
+    prevp = p;
+    minp = p;
+    minr.copy(*this);
+    
+    r2.copy(*this); p2 = p;
+    p2 = r2.best_two_swap(p2);
+    if (p2 < minp) { minr.copy(r2); minp = p2; }
+
+    // r2.copy(*this); p2 = p;
+    // p2 = r2.best_three_swap(p2);
+    // if (p2 < minp) { minr.copy(r2); minp = p2; }
+
+    r2.copy(*this); p2 = p;
+    p2 = r2.best_two_opt(p2);
+    if (p2 < minp) { minr.copy(r2); minp = p2; }
+
+    r2.copy(*this); p2 = p;
+    p2 = r2.best_three_opt(100, p2);
+    if (p2 < minp) { minr.copy(r2); minp = p2; }
+
+    r2.copy(*this); p2 = p;
+    p2 = r2.best_brother_opt(p2);
+    if (p2 < minp) { minr.copy(r2); minp = p2; }
+
+    p = minp;
+    copy(minr);
   } while (p < prevp && !hard_limit_passed());
   return p;
 }
@@ -1158,6 +1198,8 @@ int wander(Route *rs, int route_count) {
           step_types_probability[i] = 0;
         else if ((i == st_three_swap || i == st_three_opt) && region_count <= 3)
           step_types_probability[i] = 0;
+        else if (i != st_brother_opt && region_count == 2)
+          step_types_probability[i] = 0;
         else
           step_types_probability[i] = ceil(step_types_enhanced[i] * 100000.0 / step_types_cnt[i]);
         step_types_probability[0] += step_types_probability[i];
@@ -1335,7 +1377,7 @@ int main() {
 
   // sjedeme do minima pomoci dva- nebo tri-optu
   for (int i=0; i<route_count; i++) {
-    int p = rs[i].best_brother();
+    int p = rs[i].best_brother_opt();
     if (region_count < 100)
       p = rs[i].gd_three_opt(50);
     else
@@ -1353,17 +1395,19 @@ int main() {
   }
 
   // zihani
+  if (region_count > 2 || siblings.cities_with_siblings_count > 0) {
 #ifdef DEBUG
-  printf("%#6.3fs jdeme bloudit.\n", elapsed());
+    printf("%#6.3fs jdeme bloudit.\n", elapsed());
 #endif
-  wander(rs, route_count);
+    wander(rs, route_count);
+  }
 
   // vypis vysledku
 #ifdef DEBUG
   printf("%#6.3fs Jeste dooptimalizujeme, zatim cena: %d.\n", elapsed(), result_price);
 #endif
   if (region_count < 100)
-    result_route->gd_three_opt(100);
+    result_route->gd_all();
   else
     result_route->gd_two_opt();
   result_route->print();

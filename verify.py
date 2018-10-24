@@ -101,6 +101,7 @@ def verify(input_filename, output_filename, time = None):
         "TSALESMAN2-2.in":   2159,
         "TSALESMAN2-3.in":  44151,
         "TSALESMAN2-4.in": 118814,
+        
         "data_5.txt.in":     1950,
         "data_10.txt.in":    5375,
         "data_15.txt.in":    4281,
@@ -113,6 +114,13 @@ def verify(input_filename, output_filename, time = None):
         "data_100.txt.in":  14140, # (ve fóru 14942)
         "data_200.txt.in":  28124, # (ve fóru 28338, ~27000)
         "data_300.txt.in":  41235, # (ve fóru 34517)
+
+        "pidi.in":              4,
+        "mini.in":            100,
+        "micro.in":           100,
+        "pico.in":            101,
+        "mili.in":            111,
+        "nano.in":             60,
     }
     standard_price = 0
     for k, v in standards.items():
