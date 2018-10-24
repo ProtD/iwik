@@ -197,9 +197,12 @@ public:
   }
   
   inline int index(int from, int to, int day) {
-    assert((from)>0 && (from)<=city_count);
-    assert((to)>0 && (to)<=city_count);
-    assert((day)>=0 && (day)<region_count);
+    assert(from>0);
+    assert(from<=city_count);
+    assert(to>0);
+    assert(to<=city_count);
+    assert(day>=0);
+    assert(day<region_count);
     return day + from * region_count + to * region_count_times_city_count_plus_one;
   }
 
@@ -421,6 +424,7 @@ public:
   }
 
   inline void print();
+  inline void short_print();
 
   void random_init();
   void greedy_init(int forward, int backward, Route *anti);
@@ -436,6 +440,10 @@ public:
   inline void three_swap(int i1, int i2, int i3);
   inline int three_points_price(int i, int j, int k, int a, int b, int c);
   inline int price_after_three_swap(int i, int j, int k, int current_price);
+
+  // presun mesta i na misto j
+  inline void cut_and_paste(int i, int j);
+  inline int price_after_cut_and_paste(int i, int j, int current_price);
 
   // nahrazeni i mestem j (ze stejneho regionu)
   inline void brother_opt(int i, int j);
@@ -480,6 +488,13 @@ void Route::print() {
          << i+1 << " "
          << PRICE(route[i], route[i+1], i)
          << endl << flush;
+}
+
+void Route::short_print() {
+  cout << price() << " =";
+  for (int i=0; i<=region_count; i++)
+    cout << " " << i << ":" << route[i];
+  cout << endl;
 }
 
 // nahodna inicializace
@@ -663,7 +678,40 @@ int Route::price_after_three_swap(int i, int j, int k, int current_price) {
     return r2.price();
   }
 }
-  
+
+void Route::cut_and_paste(int i, int j) {
+  int x = route[i];
+  if (i<j)
+    for (int k=i; k<j; k++)
+      route[k] = route[k+1];
+  else
+    for (int k=i; k>j; k--)
+      route[k] = route[k-1];
+  route[j] = x;
+}
+
+int Route::price_after_cut_and_paste(int i, int j, int current_price) {
+  assert(i>0 && i<region_count);
+  assert(j>0 && j<region_count);
+  assert(i!=j);
+
+  int result = current_price;
+  if (i<j) {
+    result += -PRICE(route[i-1], route[i], i-1) + PRICE(route[i-1], route[i+1], i-1);
+    result += -PRICE(route[i], route[i+1], i) + PRICE(route[j], route[i], j-1);
+    for (int k=i+1; k<j; k++)
+      result += -PRICE(route[k], route[k+1], k) + PRICE(route[k], route[k+1], k-1);
+    result += -PRICE(route[j], route[j+1], j) + PRICE(route[i], route[j+1], j);
+  } else {
+    result += -PRICE(route[j-1], route[j], j-1) + PRICE(route[j-1], route[i], j-1);
+    result += -PRICE(route[i-1], route[i], i-1) + PRICE(route[i], route[j], j);
+    for (int k=j; k<i-1; k++)
+      result += -PRICE(route[k], route[k+1], k) + PRICE(route[k], route[k+1], k+1);
+    result += -PRICE(route[i], route[i+1], i) + PRICE(route[i-1], route[i+1], i);
+  }
+  return result;
+}
+
 void Route::brother_opt(int i, int j) {
   route[i] = j;
 }
@@ -949,8 +997,9 @@ const int st_two_swap = 1;
 const int st_three_swap = 2;
 const int st_two_opt = 3;
 const int st_three_opt = 4;
-const int st_brother_opt = 5;
-const int st_size = 6;
+const int st_cut_and_paste = 5;
+const int st_brother_opt = 6;
+const int st_size = 7;
 
 int random_choice(int count, int sum, ...) {
   va_list args;
@@ -977,12 +1026,13 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
 
   step_type = st_none;
   do {
-    step_type = random_choice(5, step_type_probability[0],
-                              step_type_probability[st_two_swap],    st_two_swap,
-                              step_type_probability[st_three_swap],  st_three_swap,
-                              step_type_probability[st_two_opt],     st_two_opt,
-                              step_type_probability[st_three_opt],   st_three_opt,
-                              step_type_probability[st_brother_opt], st_brother_opt);
+    step_type = random_choice(6, step_type_probability[0],
+                              step_type_probability[st_two_swap],      st_two_swap,
+                              step_type_probability[st_three_swap],    st_three_swap,
+                              step_type_probability[st_two_opt],       st_two_opt,
+                              step_type_probability[st_three_opt],     st_three_opt,
+                              step_type_probability[st_cut_and_paste], st_cut_and_paste,
+                              step_type_probability[st_brother_opt],   st_brother_opt);
     switch (step_type) {
 
     case st_brother_opt:
@@ -1012,18 +1062,22 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
     case st_three_swap:
     case st_two_opt:
     case st_three_opt:
+    case st_cut_and_paste:
       int indices = (step_type == st_three_swap || step_type == st_three_opt) ? 3 : 2;
       for (int i=0; i<indices; i++) {
         int leave;
         do {
-          step_params[i] = rand_one_to_reg_minus_one();
+          if (step_type == st_two_opt || step_type == st_three_opt)
+            step_params[i] = rand_one_to_reg();
+          else
+            step_params[i] = rand_one_to_reg_minus_one();
           leave = 1;
           for (int j=0; j<i; j++)
             if (step_params[i] == step_params[j])
               leave = 0;
         } while (!leave);
       }
-      if (step_type != st_two_swap && step_type != st_three_swap) {
+      if (step_type == st_two_opt || step_type == st_three_opt) {
         sort(step_params, step_params+indices);
         if (step_params[indices-1] - step_params[0] > 1000) {       // todo
           step_type = st_none;
@@ -1039,6 +1093,7 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
         step_params[3] = rand_int(2);
         p2 = r.price_after_three_opt(step_params[3], step_params[0], step_params[1], step_params[2], p, p + MAX_PRICE);
         break;
+      case st_cut_and_paste: p2 = r.price_after_cut_and_paste(step_params[0], step_params[1], p); break;
       }
     }
   } while (step_type == st_none);
@@ -1067,15 +1122,18 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
     }
     
     switch (step_type) {
-    case st_brother_opt: r2->brother_opt(step_params[0], step_params[1]); break;
-    case st_two_swap:    r2->two_swap(step_params[0], step_params[1]); break;
-    case st_three_swap:  r2->three_swap(step_params[0], step_params[1], step_params[2]); break;
-    case st_two_opt:     r2->two_opt(step_params[0], step_params[1]); break;
-    case st_three_opt:   r2->three_opt(step_params[3], step_params[0], step_params[1], step_params[2]); break;
+    case st_brother_opt:   r2->brother_opt(step_params[0], step_params[1]); break;
+    case st_two_swap:      r2->two_swap(step_params[0], step_params[1]); break;
+    case st_three_swap:    r2->three_swap(step_params[0], step_params[1], step_params[2]); break;
+    case st_two_opt:       r2->two_opt(step_params[0], step_params[1]); break;
+    case st_three_opt:     r2->three_opt(step_params[3], step_params[0], step_params[1], step_params[2]); break;
+    case st_cut_and_paste: r2->cut_and_paste(step_params[0], step_params[1]); break;
     }
-    // if (r2->price() != p2)
-    //   cout << step << ": typ " << step_type << ": stated price " << p2 << " != real " << r2->price() << " (diff. " << p2-r2->price() << "), "
+    // if (r2->price() != p2) {
+    //   cout << "krok" << step << ": typ " << step_type << ": stated price " << p2 << " != real " << r2->price() << " (diff. " << p2-r2->price() << "), "
     //        << step_params[0] << ", " << step_params[1] << ", " << step_params[2] << endl;
+    //   r2->short_print();
+    // }
     assert(r2->price() == p2);
       
     if (p2 < bestp) {
@@ -1162,9 +1220,9 @@ int wander(Route *rs, int route_count) {
   int ps[route_count];
   int bestps[route_count];
   Route bestrs[route_count];
-  int step_types_cnt[st_size] = {0, 1, 1, 1, 1, 1};
-  int step_types_enhanced[st_size] = {0, 10, 4, 2, 1, 3};
-  int step_types_accepted[st_size] = {0, 0, 0, 0, 0, 0};
+  int step_types_cnt[st_size] = {0, 1, 1, 1, 1, 1, 1};
+  int step_types_enhanced[st_size] = {0, 10, 4, 2, 1, 2, 3};
+  int step_types_accepted[st_size] = {0, 0, 0, 0, 0, 0, 0};
   int step_types_probability[st_size];
 
   wandering_started = elapsed();
@@ -1205,6 +1263,7 @@ int wander(Route *rs, int route_count) {
         step_types_probability[0] += step_types_probability[i];
       }
     }
+
 
     for (int i=0; i<route_count; i++) {
       int allowed = (ps[i] < MAX_PRICE);
@@ -1277,7 +1336,7 @@ float probe_temperature(Route *rs, int route_count)
 {
   int p, bestp;
   Route r, bestr;
-  int step_types_probability[st_size] = {1, 1, 0, 0, 0, 0};
+  int step_types_probability[st_size] = {1, 1, 0, 0, 0, 0, 0};
 
   int orig_p[route_count];
   for (int i=0; i<route_count; i++)
