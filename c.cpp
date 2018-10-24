@@ -1,7 +1,7 @@
 
-#define DEBUG (1)
+//#define DEBUG (1)
 //#define NO_TIME_LIMIT (1)
-//#define NDEBUG
+#define NDEBUG
 
 
 #include <assert.h>
@@ -943,20 +943,19 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
                               step_type_probability[st_two_opt],     st_two_opt,
                               step_type_probability[st_three_opt],   st_three_opt,
                               step_type_probability[st_brother_opt], st_brother_opt);
-    step_type = st_two_swap;
     switch (step_type) {
 
     case st_brother_opt:
       // dva zpusoby jak nalezt nahodnou zmenu
       if (siblings.cities_with_siblings_count < region_count) {
         int rnd = rand_int(siblings.cities_with_siblings_count - siblings.regions_with_siblings_count);
-        for (int i=0; i<region_count; i++) {
-          if (rnd < siblings.count(i) - 1) {
+        for (int i=1; i<=region_count; i++) {
+          if (rnd < siblings.count(r.route[i]) - 1) {
             step_params[0] = i;
-            step_params[1] = siblings.get(i, rnd + 1);
+            step_params[1] = siblings.get(r.route[i], rnd + 1);
             break;
           }
-          rnd -= siblings.count(i) - 1;
+          rnd -= siblings.count(r.route[i]) - 1;
         }
       } else {
         int to_change;
@@ -1009,9 +1008,13 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
 
   int ascended = (p2 > p);
   int accepted;
-  if (ascended)
-    accepted = (rand_real() < exp((p-p2)/normalized_temperature));
-  else
+  if (ascended) {
+    // todo: zavest teploty zvlast pro kazdy typ tahu, mezitim tento hnus
+    if (step_type == st_brother_opt)
+      accepted = (rand_real() < exp((p-p2)/normalized_temperature*100.0));
+    else
+      accepted = (rand_real() < exp((p-p2)/normalized_temperature));
+  } else
     accepted = 1;
 
   if (p2 < bestp || accepted) {
@@ -1030,9 +1033,9 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
     case st_two_opt:     r2->two_opt(step_params[0], step_params[1]); break;
     case st_three_opt:   r2->three_opt(step_params[3], step_params[0], step_params[1], step_params[2]); break;
     }
-    if (r2->price() != p2)
-      cout << step << ": typ " << step_type << ": stated price " << p2 << " != real " << r2->price() << " (diff. " << p2-r2->price() << "), "
-           << step_params[0] << ", " << step_params[1] << ", " << step_params[2] << endl;
+    // if (r2->price() != p2)
+    //   cout << step << ": typ " << step_type << ": stated price " << p2 << " != real " << r2->price() << " (diff. " << p2-r2->price() << "), "
+    //        << step_params[0] << ", " << step_params[1] << ", " << step_params[2] << endl;
     assert(r2->price() == p2);
       
     if (p2 < bestp) {
@@ -1055,20 +1058,20 @@ inline float exp_interpolate(float fraction, float from, float to) {
   return from * exp(fraction * log(to / from));
 }
 
-inline void pressure_schedule(float &pressure_price, const float &current_time, const int &step) {
+inline void pressure_schedule(int &pressure_price, const float &current_time, const int &step) {
   float time_ratio = (current_time - wandering_started) / wandering_interval;
   if (current_time > time_limit)
     pressure_price = MAX_PRICE;
   else
     pressure_price = exp_interpolate(time_ratio,
-                                     2 * stats_price_max, MAX_PRICE);
+                                     10 * stats_price_max, MAX_PRICE);
   if (pressure_price > MAX_PRICE)
     pressure_price = MAX_PRICE;
   result_price = result_route->price();
 }
 
 const int lam_smoothing = 500;
-inline void lam_temperature_schedule(float &temperature, const float &current_time, const int &step, const float &accept_rate) {
+inline void lam_temperature_schedule(float &temperature, const float &current_time, const int &step, const float &accept_rate, const int &so_far_accepted) {
   const float first_lam_time = 0.15;
   const float second_lam_time = 0.65;
   const float lam_level = 0.44;
@@ -1092,7 +1095,24 @@ inline void lam_temperature_schedule(float &temperature, const float &current_ti
   //    cout << "LAM " << time_ratio << " " << lam_rate << " " << accept_rate << " " << temperature << endl;
 }
 
-inline void exp_temperature_schedule(float &temperature, const float &current_time, const int &step, const float &accept_ratio) {
+unsigned int last_cooling = 0;
+unsigned int last_so_far_accepted = 0;
+inline void subexponential_temperature_schedule(float &temperature, const float &current_time, const unsigned int &step, const float &accept_rate, const int &so_far_accepted) {
+  const float starting_temperature = 300;
+  const unsigned int min_cooling_step = 1000000;
+  const unsigned int min_accepted = 500;
+  const float cooling_rate = 0.99;
+
+  if (last_cooling == 0)
+    temperature = starting_temperature;
+  if (step - last_cooling >= min_cooling_step || so_far_accepted - last_so_far_accepted >= min_accepted) {
+    temperature *= cooling_rate;
+    last_cooling = step;
+    last_so_far_accepted = so_far_accepted;
+  }
+}
+
+inline void exp_temperature_schedule(float &temperature, const float &current_time, const unsigned int &step, const float &accept_rate, const int &so_far_accepted) {
   float time_ratio = (current_time - floor(current_time / time_limit) * time_limit - wandering_started) / wandering_interval;
 //  temperature = exp_interpolate(time_ratio, stats_price_mean / 5, stats_price_mean / 10);
   temperature = exp_interpolate(time_ratio, region_count / 2, region_count / 8);
@@ -1112,9 +1132,8 @@ int wander(Route *rs, int route_count) {
   
   float accept_rate = 0.5;
   float temperature = 1000;
-  //  pressure_schedule(pressure, wandering_started, 0);
-  pressure_price = MAX_PRICE;
-  lam_temperature_schedule(temperature, wandering_started, 0, 0.5);
+  pressure_schedule(pressure_price, wandering_started, 0);
+  subexponential_temperature_schedule(temperature, wandering_started, 0, 0.5, 0);
   for (int i=0; i<route_count; i++) {
     bestrs[i].copy(rs[i]);
     bestps[i] = ps[i] = rs[i].price();
@@ -1137,6 +1156,8 @@ int wander(Route *rs, int route_count) {
       for (int i=1; i<st_size; i++) {
         if (i == st_brother_opt && siblings.cities_with_siblings_count == 0)
           step_types_probability[i] = 0;
+        else if ((i == st_three_swap || i == st_three_opt) && region_count <= 3)
+          step_types_probability[i] = 0;
         else
           step_types_probability[i] = ceil(step_types_enhanced[i] * 100000.0 / step_types_cnt[i]);
         step_types_probability[0] += step_types_probability[i];
@@ -1152,6 +1173,7 @@ int wander(Route *rs, int route_count) {
         step_types_enhanced[step_type]++;
       if (step_result == sr_accepted || step_result == sr_descended || step_result == sr_enhanced) {
         step_types_accepted[step_type]++;
+        step_types_accepted[0]++;
         if (allowed)
           accept_rate = ((lam_smoothing-1) * accept_rate + 1) / lam_smoothing;
       }
@@ -1163,9 +1185,9 @@ int wander(Route *rs, int route_count) {
     step++;
     if (step % 1000 == 0) {
       float current_time = elapsed();
-      lam_temperature_schedule(temperature, current_time, step, accept_rate);
+      subexponential_temperature_schedule(temperature, current_time, step, accept_rate, step_types_accepted[0]);
       if (step % 50000 == 0) {
-        //        pressure_schedule(pressure_price, current_time, step);
+        pressure_schedule(pressure_price, current_time, step);
         for (int i=0; i<route_count; i++) {
           ps[i] = rs[i].price();
           bestps[i] = bestrs[i].price();
@@ -1335,14 +1357,13 @@ int main() {
   printf("%#6.3fs jdeme bloudit.\n", elapsed());
 #endif
   wander(rs, route_count);
-  //wander(rs, route_count);
 
   // vypis vysledku
 #ifdef DEBUG
   printf("%#6.3fs Jeste dooptimalizujeme, zatim cena: %d.\n", elapsed(), result_price);
 #endif
   if (region_count < 100)
-    result_route->gd_three_opt(50);
+    result_route->gd_three_opt(100);
   else
     result_route->gd_two_opt();
   result_route->print();
