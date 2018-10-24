@@ -58,7 +58,6 @@ int signal_caught = 0;
 int pressure_price = MAX_PRICE;
 int MAX_INT = std::numeric_limits<int>::max();
 
-int two_way_city_count;
 int city_stats[MAXN][2];   // ke kazdemu mestu, jestli ma vubec nejake vstupni / vystupni lety
 #define INWARD (0)
 #define OUTWARD (1)
@@ -100,6 +99,9 @@ inline int rand_one_to_reg() {
 class Siblings {
   int brothers[MAXN][MAXN]; // ke kazdemu mestu seznam mest ve stejnem regionu, prvni je pocet, konci 0
 public:
+  int cities_with_siblings_count = 0;
+  int regions_with_siblings_count = 0;
+
   // vytvori z mest od i az do j sourozence
   inline int set_interval(int first_i, int last_i) {
     for (int j=first_i; j<=last_i; j++) {
@@ -109,6 +111,10 @@ public:
       for (int k=j+1; k<=last_i; k++)
         brothers[j][k - first_i] = k;
       brothers[j][last_i + 1 - first_i] = 0;
+    }
+    if (last_i - first_i > 0) {
+      cities_with_siblings_count += last_i - first_i + 1;
+      regions_with_siblings_count++;
     }
   }
 
@@ -135,7 +141,12 @@ public:
       }
       brothers[sibl][0] -= found;
     }
+    if (brothers[i][0] == 1) {
+      cities_with_siblings_count--;
+      regions_with_siblings_count--;
+    }
     brothers[i][0] = 0;
+    cities_with_siblings_count--;
   }
 
   // vrati nahodneho sourozence mesta i
@@ -241,7 +252,7 @@ int a2i(int *city_list, char *code) {
 void load() {
   int *city_list = (int *) calloc(CODE_CHAR_SIZE * CODE_CHAR_SIZE * CODE_CHAR_SIZE, sizeof(int));
   const size_t line_size = 300;
-  char *line = (char *) malloc(line_size);
+  char *line = (char *) malloc(line_size+1);
   char *c;
   char initial_code[3+1] = "";
 
@@ -255,7 +266,9 @@ void load() {
   // definice oblasti
   int region_from = 1;
   for (int i=0; i<region_count; i++) {
-    fgets(line, line_size, stdin);
+    do {
+      fgets(line, line_size, stdin);
+    } while (line[strlen(line)-1] != '\n');
     fgets(line+1, line_size, stdin);
     c = line;
     int region_to = region_from;
@@ -311,6 +324,10 @@ void load() {
   free(line);
 
   initial = a2i(city_list, initial_code);
+#ifdef DEBUG
+  printf("%#6.3fs Nacteno %d mest, %d oblasti, limit je %d s, zacina se v %s (%d).\n", elapsed(), city_count, region_count, time_limit, initial_code, initial);
+#endif
+ 
   for (int order=0; order<siblings.count(initial); order++) {
     int k = siblings.get(initial, order);
     if (k == initial)
@@ -320,19 +337,19 @@ void load() {
   }
 
 #ifdef DEBUG
-  cout << "Nalezene slepe ulicky:";
+  printf("%#6.3fs Nalezene slepe ulicky:", elapsed());
 #endif
-  two_way_city_count = city_count;
   for (int i=1; i<=city_count; i++)
     if (city_stats[i][INWARD] == 0 || city_stats[i][OUTWARD] == 0) {
       siblings.remove(i);
-      two_way_city_count--;
 #ifdef DEBUG
       cout << " " << city_codes[i];
     }
-  cout << " ... zbyva " << two_way_city_count << endl;
+  cout << " ... zbyva " << siblings.cities_with_siblings_count
+       << " v " << siblings.regions_with_siblings_count
+       << " regionech" << endl;
 #else
-}
+    }
 #endif
 
 stats_price_mean = float(stats_price_sum) / stats_price_count;
@@ -370,7 +387,6 @@ cout << "Statistiky:" << endl
 << "Pocet spoju: " << stats_price_count << endl
 << "Prumerna / maximalni cena spoje: " << stats_price_mean << ", " << stats_price_max << endl
 << "Rozptyl: " << stats_price_variance << endl;
-  
 printf("%#6.3fs Nacteno %d mest, %d oblasti, limit je %d s, zacina se v %s (%d).\n", elapsed(), city_count, region_count, time_limit, initial_code, initial);
 #endif
 
@@ -422,8 +438,8 @@ public:
   inline int price_after_three_swap(int i, int j, int k, int current_price);
 
   // nahrazeni i mestem j (ze stejneho regionu)
-  inline void brother_opt(int i, int k);
-  inline int price_after_brother_opt(int i, int brother, int current_price);
+  inline void brother_opt(int i, int j);
+  inline int price_after_brother_opt(int i, int j, int current_price);
   int best_brother(int p = 0);
 
   // rotace useku mezi i a j, predpoklada i < j
@@ -645,18 +661,18 @@ int Route::price_after_three_swap(int i, int j, int k, int current_price) {
   }
 }
   
-void Route::brother_opt(int i, int k) {
-  route[i] = k;
+void Route::brother_opt(int i, int j) {
+  route[i] = j;
 }
 
-int Route::price_after_brother_opt(int i, int k, int current_price) {
+int Route::price_after_brother_opt(int i, int j, int current_price) {
   int result = current_price
     - PRICE(route[i-1], route[i], i-1)
-    + PRICE(route[i-1], k, i-1);
+    + PRICE(route[i-1], j, i-1);
   if (i < region_count)
     return result
       - PRICE(route[i], route[i+1], i)
-      + PRICE(k, route[i+1], i);
+      + PRICE(j, route[i+1], i);
   return result;  
 }
 
@@ -930,13 +946,26 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
     switch (step_type) {
 
     case st_brother_opt:
-      int to_change;
-      do {
-        step_params[0] = rand_one_to_reg();
-        to_change = siblings.get_random_sibling(r.route[step_params[0]]);
-      } while (to_change == 0);
-      step_params[1] = to_change;
-      p2 = r.price_after_brother_opt(step_params[0], to_change, p);
+      // dva zpusoby jak nalezt nahodnou zmenu
+      if (siblings.cities_with_siblings_count < region_count) {
+        int rnd = rand_int(siblings.cities_with_siblings_count - siblings.regions_with_siblings_count);
+        for (int i=0; i<region_count; i++) {
+          if (rnd < siblings.count(i) - 1) {
+            step_params[0] = i;
+            step_params[1] = siblings.get(i, rnd + 1);
+            break;
+          }
+          rnd -= siblings.count(i) - 1;
+        }
+      } else {
+        int to_change;
+        do {
+          step_params[0] = rand_one_to_reg();
+          to_change = siblings.get_random_sibling(r.route[step_params[0]]);
+        } while (to_change == 0);
+        step_params[1] = to_change;
+      }
+      p2 = r.price_after_brother_opt(step_params[0], step_params[1], p);
       break;
       
     case st_two_swap:
@@ -1075,7 +1104,7 @@ int wander(Route *rs, int route_count, float starting_temperature) {
     if (step % 10000 == 0) {
       step_types_probability[0] = 0;
       for (int i=1; i<st_size; i++) {
-        if (i == st_brother_opt && two_way_city_count == region_count)
+        if (i == st_brother_opt && siblings.cities_with_siblings_count == 0)
           step_types_probability[i] = 0;
         else
           step_types_probability[i] = ceil(step_types_enhanced[i] * 100000.0 / step_types_cnt[i]);
