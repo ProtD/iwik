@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
+import numpy as np
 import os
 import subprocess
 import sys
 import time
 
 
-def verify(input_filename, output_filename, time = None):
+def verify(input_filename, output_filename, time = None, silent=False):
     try:
         input = open(input_filename, 'r')
         output = open(output_filename, 'r')
@@ -62,14 +63,15 @@ def verify(input_filename, output_filename, time = None):
             p = int(p)
 
             if (f, t, d) not in input_flights:
-                print("Error: Flight on output is not in input: {} {} {} {}".format(f, t, d, p))
-                return 0
+                if p < 500000 or not silent:
+                    print("Error: Flight on output is not in input: {} {} {} {}".format(f, t, d, p))
+                return (999999, 0)
             calculated_price += input_flights[(f, t, d)]
             output_flights.append((f, t, d))
         output.close()
     except:
         print("Error: Wrong input -- error on the very first line")
-        return 0
+        return (999999, 0)
 
     if calculated_price != output_price:
         print("Error: Price is not good: is {}, should be {}".format(output_price, calculated_price))
@@ -131,14 +133,42 @@ def verify(input_filename, output_filename, time = None):
     if input_filename.endswith("TSALESMAN2-3.in") or input_filename.endswith("TSALESMAN2-4.in"):
         weight = 1.5
 
-    print("OK -- price: {}, points: {:.2f}, weighted: {:.2f}{}".format(
-        output_price,
-        standard_price * 100.0 / output_price,
-        standard_price * 100.0 / output_price * weight,
-        "" if not time else ", time: {:.3f}".format(time),
-    ))
-    return standard_price * 100.0 / output_price * weight
+    if not silent:
+        print("OK -- price: {}, points: {:.2f}, weighted: {:.2f}{}".format(
+            output_price,
+            standard_price * 100.0 / output_price,
+            standard_price * 100.0 / output_price * weight,
+            "" if not time else ", time: {:.3f}".format(time),
+        ))
+    return (output_price, standard_price * 100.0 / output_price * weight)
 
+
+def test(source_filename, input_filename, runs):
+    print("Compiling ... ", end="")
+    sys.stdout.flush()
+    os.system("./compile.sh {}".format(source_filename))
+    print("OK")
+    filename, extension = os.path.splitext(os.path.split(input_filename)[1])
+    output_filename = os.path.join("output", filename + ".out")
+
+    times = []
+    scores = []
+    prices = []
+    print("Runninng and verifying ... ", end="")
+    for i in range(int(runs)):
+        print(i+1, end=" ")
+        sys.stdout.flush()
+        time_start = time.time()
+        os.system("./a.out < {} > {}".format(input_filename, output_filename))
+        time_end = time.time()
+        price, score = verify(input_filename, output_filename, silent=True)
+        prices.append(price)
+        scores.append(score)
+        times.append(time_end - time_start)
+    print("OK")
+    print("Price: mean {:10.3f}, min {:7d},     max {:7d}".format(np.mean(prices), int(np.min(prices)), int(np.max(prices))))
+    print("Score: mean {:10.3f}, min  {:10.3f}, max  {:10.3f}".format(np.mean(scores), np.min(scores), np.max(scores)))
+    print("Time:  mean {:10.3f}, min      {:6.3f}, max      {:6.3f}".format(np.mean(times), np.min(times), np.max(times)))
 
 if len(sys.argv) == 2:
     directory = sys.argv[1]
@@ -153,10 +183,16 @@ if len(sys.argv) == 2:
         time_start = time.time()
         os.system("./a.out < {} > {}".format(fin, fout))
         time_end = time.time()
-        score += verify(fin, fout, time_end - time_start)
+        score += verify(fin, fout, time_end - time_start)[1]
     print("\nSum: {:.2f}".format(score))
 elif len(sys.argv) == 3:
     verify(sys.argv[1], sys.argv[2])
+elif len(sys.argv) == 4:
+    test(sys.argv[1], sys.argv[2], sys.argv[3])
 else:
-    print("Expecting\neither 1 argument - Input directory,\nor 2 arguments - 1) Input file, 2) Contestant\'s output file")
+    print("""Expecting
+either 1 argument - 1) Input directory,
+or 2 arguments - 1) Input file, 2) Contestant\'s output file
+or 3 arguments - 1) Source code file, 2) Input file, 3) Number of runs
+""")
     sys.exit(1)
