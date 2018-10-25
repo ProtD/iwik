@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import itertools
 import numpy as np
 import os
 import subprocess
@@ -143,10 +144,26 @@ def verify(input_filename, output_filename, time = None, silent=False):
     return (output_price, standard_price * 100.0 / output_price * weight)
 
 
-def test(source_filename, input_filename, runs):
+# a=1,2;b=x,y   ->   iterator #define over all combinations of parameter values
+def get_param_combinations(params):
+    if params is None:
+        yield (None, None)
+    else:
+        keys, multivalues = zip(*[x.split("=") for x in params.split(",")])
+        for values in itertools.product(*[x.split(":") for x in multivalues]):
+            yield (
+                " ".join("{}={}".format(k.lower(), v) for k, v in zip(keys, values)),
+                "\n".join(["#define PARAM_TUNING"] + ["#define PARAM_{} ({})".format(k, v) for k, v in zip(keys, values)])
+            )
+
+def test(source_filename, input_filename, runs, preambule):
     print("Compiling ... ", end="")
     sys.stdout.flush()
-    os.system("./compile.sh {}".format(source_filename))
+    with open("temp.cpp", "w") as f:
+        if preambule is not None:
+            print(preambule, file=f)
+    os.system("cat {} >> temp.cpp".format(source_filename))
+    os.system("./compile.sh temp.cpp".format(source_filename))
     print("OK")
     filename, extension = os.path.splitext(os.path.split(input_filename)[1])
     output_filename = os.path.join("output", filename + ".out")
@@ -189,10 +206,14 @@ elif len(sys.argv) == 3:
     verify(sys.argv[1], sys.argv[2])
 elif len(sys.argv) == 4:
     test(sys.argv[1], sys.argv[2], sys.argv[3])
+elif len(sys.argv) == 5:
+    for params, preambule in get_param_combinations(sys.argv[4]):
+        print("=== {} ===".format(params))
+        test(sys.argv[1], sys.argv[2], sys.argv[3], preambule)
 else:
     print("""Expecting
 either 1 argument - 1) Input directory,
 or 2 arguments - 1) Input file, 2) Contestant\'s output file
-or 3 arguments - 1) Source code file, 2) Input file, 3) Number of runs
+or 3-4 arguments - 1) Source code file, 2) Input file, 3) Number of runs, and optional 4) Parameters ("KEY1=value1:value2,KEY2=value3")
 """)
     sys.exit(1)

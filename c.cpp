@@ -1,7 +1,17 @@
 
-//#define DEBUG (1)
-//#define NO_TIME_LIMIT (1)
+#ifndef PARAM_TUNING
+
+//#define DEBUG               // print debugging info during run
+//#define NO_TIME_LIMIT       // don't stop after 3, 5 or 15 seconds
+#define NDEBUG                // don't check asserts (faster)
+
+#undef  PARAM_STEP_TYPE
+#define PARAM_STARTING_TEMPERATURE (300)
+#define PARAM_COOLING_RATE         (0.99)
+
+#else
 #define NDEBUG
+#endif
 
 
 #include <assert.h>
@@ -33,7 +43,6 @@ auto rand_integer = std::bind(std::uniform_int_distribution<unsigned int>(0,0x8f
 function<unsigned int()> rand_one_to_reg_minus_one_aux = std::bind(std::uniform_int_distribution<unsigned int>(0,1), random_generator);
 function<unsigned int()> rand_one_to_reg_aux = std::bind(std::uniform_int_distribution<unsigned int>(0,1), random_generator);
 inline int rand_int(int less_than) { return rand_integer() % less_than; }
-
 
 
 #ifdef DEBUG
@@ -471,9 +480,9 @@ int result_price = MAX_INT;
 
 inline int soft_limit_passed() {
   if (result_price < pressure_price * region_count)
-    return elapsed() + region_count / 500.0 + 0.1 > time_limit;
+    return elapsed() + region_count / 2000.0 + 0.2 > time_limit;
   else
-    return elapsed() + 0.1 > time_limit;
+    return elapsed() + 0.2 > time_limit;
 }
 
 inline int hard_limit_passed() {
@@ -1026,6 +1035,9 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
 
   step_type = st_none;
   do {
+#ifdef PARAM_STEP_TYPE
+    step_type = PARAM_STEP_TYPE;
+#else
     step_type = random_choice(6, step_type_probability[0],
                               step_type_probability[st_two_swap],      st_two_swap,
                               step_type_probability[st_three_swap],    st_three_swap,
@@ -1033,6 +1045,7 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
                               step_type_probability[st_three_opt],     st_three_opt,
                               step_type_probability[st_cut_and_paste], st_cut_and_paste,
                               step_type_probability[st_brother_opt],   st_brother_opt);
+#endif
     switch (step_type) {
 
     case st_brother_opt:
@@ -1196,10 +1209,10 @@ inline void lam_temperature_schedule(float &temperature, const float &current_ti
 unsigned int last_cooling = 0;
 unsigned int last_so_far_accepted = 0;
 inline void subexponential_temperature_schedule(float &temperature, const float &current_time, const unsigned int &step, const float &accept_rate, const int &so_far_accepted) {
-  const float starting_temperature = 300;
+  const float starting_temperature = PARAM_STARTING_TEMPERATURE;
   const unsigned int min_cooling_step = 1000000;
   const unsigned int min_accepted = 500;
-  const float cooling_rate = 0.99;
+  const float cooling_rate = PARAM_COOLING_RATE;
 
   if (last_cooling == 0)
     temperature = starting_temperature;
