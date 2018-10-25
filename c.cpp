@@ -1025,16 +1025,87 @@ int random_choice(int count, int sum, ...) {
   return st_none;
 }
 
+inline int choose_step(int step_type, Route r, int p, int step_params[], const int *step_type_probability)
+{
+  int p2;
+
+  switch (step_type) {
+
+  case st_brother_opt:
+    // dva zpusoby jak nalezt nahodnou zmenu
+    if (siblings.cities_with_siblings_count < region_count) {
+      int rnd = rand_int(siblings.cities_with_siblings_count - siblings.regions_with_siblings_count);
+      for (int i=1; i<=region_count; i++) {
+        if (rnd < siblings.count(r.route[i]) - 1) {
+          step_params[0] = i;
+          step_params[1] = siblings.get(r.route[i], rnd + 1);
+          break;
+        }
+        rnd -= siblings.count(r.route[i]) - 1;
+      }
+    } else {
+      int to_change;
+      do {
+        step_params[0] = rand_one_to_reg();
+        to_change = siblings.get_random_sibling(r.route[step_params[0]]);
+      } while (to_change == 0);
+      step_params[1] = to_change;
+    }
+    p2 = r.price_after_brother_opt(step_params[0], step_params[1], p);
+    break;
+      
+  case st_two_swap:
+  case st_three_swap:
+  case st_two_opt:
+  case st_three_opt:
+  case st_cut_and_paste:
+
+    int indices = (step_type == st_three_swap || step_type == st_three_opt) ? 3 : 2;
+  try_again:
+    for (int i=0; i<indices; i++) {
+      int leave;
+      do {
+        if (step_type == st_two_opt || step_type == st_three_opt)
+          step_params[i] = rand_one_to_reg();
+        else
+          step_params[i] = rand_one_to_reg_minus_one();
+        leave = 1;
+        for (int j=0; j<i; j++)
+          if (step_params[i] == step_params[j])
+            leave = 0;
+      } while (!leave);
+    }
+    if (step_type == st_two_opt || step_type == st_three_opt) {
+      sort(step_params, step_params+indices);
+      if (step_params[indices-1] - step_params[0] > 100)       // todo
+        goto try_again;
+    }
+        
+    switch (step_type) {
+    case st_two_swap:   p2 = r.price_after_two_swap(step_params[0], step_params[1], p); break;
+    case st_three_swap: p2 = r.price_after_three_swap(step_params[0], step_params[1], step_params[2], p); break;
+    case st_two_opt:    p2 = r.price_after_two_opt(step_params[0], step_params[1], p, p + MAX_PRICE); break;
+    case st_three_opt:
+      step_params[3] = rand_int(2);
+      p2 = r.price_after_three_opt(step_params[3], step_params[0], step_params[1], step_params[2], p, p + MAX_PRICE);
+      break;
+    case st_cut_and_paste: p2 = r.price_after_cut_and_paste(step_params[0], step_params[1], p); break;
+    }
+  }
+
+  return p2;
+}
+
 enum step_result_t { sr_forbidden, sr_rejected, sr_accepted, sr_descended, sr_enhanced };
 
 inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
                                  const float &normalized_temperature, const unsigned int step,
-                                 const int *step_type_probability, int &step_type) {
+                                 const int *step_type_probability, int &step_type)
+{
   int p2;
   int step_params[4];
 
-  step_type = st_none;
-  do {
+  if (1) {
 #ifdef PARAM_STEP_TYPE
     step_type = PARAM_STEP_TYPE;
 #else
@@ -1046,70 +1117,22 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
                               step_type_probability[st_cut_and_paste], st_cut_and_paste,
                               step_type_probability[st_brother_opt],   st_brother_opt);
 #endif
-    switch (step_type) {
-
-    case st_brother_opt:
-      // dva zpusoby jak nalezt nahodnou zmenu
-      if (siblings.cities_with_siblings_count < region_count) {
-        int rnd = rand_int(siblings.cities_with_siblings_count - siblings.regions_with_siblings_count);
-        for (int i=1; i<=region_count; i++) {
-          if (rnd < siblings.count(r.route[i]) - 1) {
-            step_params[0] = i;
-            step_params[1] = siblings.get(r.route[i], rnd + 1);
-            break;
-          }
-          rnd -= siblings.count(r.route[i]) - 1;
-        }
-      } else {
-        int to_change;
-        do {
-          step_params[0] = rand_one_to_reg();
-          to_change = siblings.get_random_sibling(r.route[step_params[0]]);
-        } while (to_change == 0);
-        step_params[1] = to_change;
-      }
-      p2 = r.price_after_brother_opt(step_params[0], step_params[1], p);
-      break;
-      
-    case st_two_swap:
-    case st_three_swap:
-    case st_two_opt:
-    case st_three_opt:
-    case st_cut_and_paste:
-      int indices = (step_type == st_three_swap || step_type == st_three_opt) ? 3 : 2;
-      for (int i=0; i<indices; i++) {
-        int leave;
-        do {
-          if (step_type == st_two_opt || step_type == st_three_opt)
-            step_params[i] = rand_one_to_reg();
-          else
-            step_params[i] = rand_one_to_reg_minus_one();
-          leave = 1;
-          for (int j=0; j<i; j++)
-            if (step_params[i] == step_params[j])
-              leave = 0;
-        } while (!leave);
-      }
-      if (step_type == st_two_opt || step_type == st_three_opt) {
-        sort(step_params, step_params+indices);
-        if (step_params[indices-1] - step_params[0] > 1000) {       // todo
-          step_type = st_none;
-          break;
-        }
-      }
-        
-      switch (step_type) {
-      case st_two_swap:   p2 = r.price_after_two_swap(step_params[0], step_params[1], p); break;
-      case st_three_swap: p2 = r.price_after_three_swap(step_params[0], step_params[1], step_params[2], p); break;
-      case st_two_opt:    p2 = r.price_after_two_opt(step_params[0], step_params[1], p, p + MAX_PRICE); break;
-      case st_three_opt:
-        step_params[3] = rand_int(2);
-        p2 = r.price_after_three_opt(step_params[3], step_params[0], step_params[1], step_params[2], p, p + MAX_PRICE);
-        break;
-      case st_cut_and_paste: p2 = r.price_after_cut_and_paste(step_params[0], step_params[1], p); break;
+    p2 = choose_step(step_type, r, p, step_params, step_type_probability);
+  } else {
+    int t_step_params[st_size][4];
+    p2 = MAX_PRICE;
+    for (int t=st_two_swap; t<=st_brother_opt; t++) {
+      if (t == st_three_opt)
+        continue;
+      int t_p2 = choose_step(t, r, p, t_step_params[t], step_type_probability);
+      if (t_p2 < p2) {
+        std::copy(t_step_params[t], t_step_params[t] + 4 * sizeof(int), step_params);
+        p2 = t_p2;
+        step_type = t;
       }
     }
-  } while (step_type == st_none);
+  }
+
 
   if (p2 - p >= MAX_PRICE)
     return sr_forbidden;
@@ -1211,7 +1234,7 @@ unsigned int last_so_far_accepted = 0;
 inline void subexponential_temperature_schedule(float &temperature, const float &current_time, const unsigned int &step, const float &accept_rate, const int &so_far_accepted) {
   const float starting_temperature = PARAM_STARTING_TEMPERATURE;
   const unsigned int min_cooling_step = 1000000;
-  const unsigned int min_accepted = 500;
+  const unsigned int min_accepted = 400;
   const float cooling_rate = PARAM_COOLING_RATE;
 
   if (last_cooling == 0)
