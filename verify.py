@@ -105,18 +105,32 @@ def verify(input_filename, output_filename, time = None, silent=False):
         "TSALESMAN2-3.in":  44151,
         "TSALESMAN2-4.in": 118814,
         
-        "data_5.txt.in":     1950,
-        "data_10.txt.in":    5375,
-        "data_15.txt.in":    4281,
-        "data_20.txt.in":    6053,
-        "data_30.txt.in":    7629,
-        "data_40.txt.in":    7660,
-        "data_50.txt.in":    7308, # (ve fóru 7235)
-        "data_60.txt.in":    9099, # (ve fóru 9180)
-        "data_70.txt.in":   11907, # (ve fóru 12358)
-        "data_100.txt.in":  14140, # (ve fóru 14942)
-        "data_200.txt.in":  28124, # (ve fóru 28338, ~27000)
-        "data_300.txt.in":  41235, # (ve fóru 34517)
+        # lonske evaluacni
+        "data_5.txt.in":     3288,
+        "data_15.txt.in":    5719,
+        "data_20.txt.in":    5850,
+        "data_30.txt.in":    6005,
+        "data_40.txt.in":    8197,
+        "data_50.txt.in":   11347,
+        "data_60.txt.in":    9959,
+        "data_70.txt.in":   13083,
+        "data_100.txt.in":  14555,
+        "data_200.txt.in":  25131,  # nej letos: 24804
+        "data_300.txt.in":  34163,
+
+        # lonske testovaci
+        # "data_5.txt.in":     1950,
+        # "data_10.txt.in":    5375,
+        # "data_15.txt.in":    4281,
+        # "data_20.txt.in":    6053,
+        # "data_30.txt.in":    7629,
+        # "data_40.txt.in":    7660,
+        # "data_50.txt.in":    7308, # (ve fóru 7235)
+        # "data_60.txt.in":    9099, # (ve fóru 9180)
+        # "data_70.txt.in":   11907, # (ve fóru 12358)
+        # "data_100.txt.in":  14140, # (ve fóru 14942)
+        # "data_200.txt.in":  28124, # (ve fóru 28338, ~27000)
+        # "data_300.txt.in":  41235, # (ve fóru 34517)
 
         "pidi.in":              4,
         "mini.in":            100,
@@ -147,16 +161,16 @@ def verify(input_filename, output_filename, time = None, silent=False):
 # a=1,2;b=x,y   ->   iterator #define over all combinations of parameter values
 def get_param_combinations(params):
     if params is None:
-        yield (None, None)
+        yield (None, "#define RUNNING_VERIFICATION")
     else:
         keys, multivalues = zip(*[x.split("=") for x in params.split(",")])
         for values in itertools.product(*[x.split(":") for x in multivalues]):
             yield (
                 " ".join("{}={}".format(k.lower(), v) for k, v in zip(keys, values)),
-                "\n".join(["#define PARAM_TUNING"] + ["#define PARAM_{} ({})".format(k, v) for k, v in zip(keys, values)])
+                "\n".join(["#define RUNNING_VERIFICATION"] + ["#define PARAM_{} ({})".format(k, v) for k, v in zip(keys, values)])
             )
 
-def test(source_filename, input_filename, runs, preambule):
+def test(source_filename, input_filename, runs, preambule = None):
     print("Compiling ... ", end="")
     sys.stdout.flush()
     with open("temp.cpp", "w") as f:
@@ -165,27 +179,37 @@ def test(source_filename, input_filename, runs, preambule):
     os.system("cat {} >> temp.cpp".format(source_filename))
     os.system("./compile.sh temp.cpp".format(source_filename))
     print("OK")
-    filename, extension = os.path.splitext(os.path.split(input_filename)[1])
-    output_filename = os.path.join("output", filename + ".out")
 
-    times = []
-    scores = []
-    prices = []
-    print("Runninng and verifying ... ", end="")
-    for i in range(int(runs)):
-        print(i+1, end=" ")
-        sys.stdout.flush()
-        time_start = time.time()
-        os.system("./a.out < {} > {}".format(input_filename, output_filename))
-        time_end = time.time()
-        price, score = verify(input_filename, output_filename, silent=True)
-        prices.append(price)
-        scores.append(score)
-        times.append(time_end - time_start)
-    print("OK")
-    print("Price: mean {:10.3f}, min {:7d},     max {:7d}".format(np.mean(prices), int(np.min(prices)), int(np.max(prices))))
-    print("Score: mean {:10.3f}, min  {:10.3f}, max  {:10.3f}".format(np.mean(scores), np.min(scores), np.max(scores)))
-    print("Time:  mean {:10.3f}, min      {:6.3f}, max      {:6.3f}".format(np.mean(times), np.min(times), np.max(times)))
+    files = []
+    if os.path.isdir(input_filename):
+        files = [os.path.join(input_filename, x)
+                 for x in sorted(os.listdir(input_filename))
+                 if x.endswith(".in") or x.endswith(".dat")]
+    else:
+        files = [input_filename]
+    for f in files:
+        print("--- {} ---".format(f))
+        filename, extension = os.path.splitext(os.path.split(f)[1])
+        output_filename = os.path.join("output", filename + ".out")
+
+        times = []
+        scores = []
+        prices = []
+        print("Runninng and verifying ... ", end="")
+        for i in range(int(runs)):
+            print(i+1, end=" ")
+            sys.stdout.flush()
+            time_start = time.time()
+            os.system("./a.out < {} > {}".format(f, output_filename))
+            time_end = time.time()
+            price, score = verify(f, output_filename, silent=True)
+            prices.append(price)
+            scores.append(score)
+            times.append(time_end - time_start)
+        print("OK")
+        print("Price: mean {:10.3f}, min {:7d},     max {:7d}".format(np.mean(prices), int(np.min(prices)), int(np.max(prices))))
+        print("Score: mean {:10.3f}, min  {:10.3f}, max  {:10.3f}".format(np.mean(scores), np.min(scores), np.max(scores)))
+        print("Time:  mean {:10.3f}, min      {:6.3f}, max      {:6.3f}".format(np.mean(times), np.min(times), np.max(times)))
 
 if len(sys.argv) == 2:
     directory = sys.argv[1]
@@ -205,7 +229,7 @@ if len(sys.argv) == 2:
 elif len(sys.argv) == 3:
     verify(sys.argv[1], sys.argv[2])
 elif len(sys.argv) == 4:
-    test(sys.argv[1], sys.argv[2], sys.argv[3])
+    test(sys.argv[1], sys.argv[2], sys.argv[3], "#define RUNNING_VERIFICATION")
 elif len(sys.argv) == 5:
     for params, preambule in get_param_combinations(sys.argv[4]):
         print("=== {} ===".format(params))
