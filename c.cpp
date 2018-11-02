@@ -24,7 +24,7 @@
 #endif
 
 #ifndef PARAM_FORBIDDEN_STEP_TYPES
-#define PARAM_FORBIDDEN_STEP_TYPES   ("1000110")
+#define PARAM_FORBIDDEN_STEP_TYPES   ("100011011")   // st_size
 #endif
 
 #ifndef RUNNING_VERIFICATION
@@ -197,6 +197,14 @@ public:
     else
       return brothers[i][rnd];
   }
+
+  // jsou i a j sourozenci?
+  inline int are_siblings(int i, int j) {
+    for (int k=0; k<count(i); k++)
+      if (get(i, k) == j)
+        return 1;
+    return 0;
+  }
 };
 Siblings siblings;
 
@@ -259,6 +267,80 @@ inline int PRICE(int from, int to, int day) {
     return x;
 }
 
+inline int REAL_PRICE(int from, int to, int day) {
+  return prices->matrix[prices->index(from, to, day)];
+}
+
+
+// seznamu nejblizsich sousedu 
+int *nnm;
+int nn_count[MAXN+1][MAXN+1];
+int NN = 20;
+
+// limit = kolik maximalne prvku potrebuju
+void quicksort2(int array[][2], int firstIndex, int lastIndex, int limit)
+{
+	int pivotIndex, temp, index1, index2, k;
+
+	if (firstIndex < lastIndex) {
+		pivotIndex = firstIndex;
+		index1 = firstIndex;
+		index2 = lastIndex;
+
+		while (index1 < index2) {
+			while (array[index1][1] <= array[pivotIndex][1] && index1 < lastIndex)
+				index1++;
+			while (array[index2][1] > array[pivotIndex][1])
+				index2--;
+
+			if (index1 < index2) {  // swap
+				for (k=0; k<2; k++) {
+					temp = array[index1][k];
+					array[index1][k] = array[index2][k];
+					array[index2][k] = temp;
+				}
+			}
+		}
+
+		//At the end of first iteration, swap pivot element with index2 element
+		for (k=0; k<2; k++) {
+			temp = array[pivotIndex][k];
+			array[pivotIndex][k] = array[index2][k];
+			array[index2][k] = temp;
+		}
+
+		//Recursive call for quick sort, with partiontioning
+		quicksort2(array, firstIndex, index2-1, limit);
+		if (limit > index2+1 - firstIndex)
+			quicksort2(array, index2+1, lastIndex, limit - (index2+1 - firstIndex));
+	}
+}
+
+void create_nn_list() {
+  if (NN > city_count)
+    NN = city_count;
+  nnm = (int *) calloc((city_count+1) * (region_count+1) * (city_count+1), sizeof(int));
+  int from, day, to;
+  for (from=1; from<=city_count; from++) {
+    for (day=0; day<region_count; day++) {
+      int tmp[city_count+1][2];
+      for (to=1; to<=city_count; to++) {
+        tmp[to][0] = to;
+        tmp[to][1] = PRICE(from, to, day);
+      }
+			quicksort2(tmp, 1, city_count, 1+NN);
+      long base = day * (city_count+1) + from * (city_count+1) * (region_count+1);
+      for (to=1; to<=NN; to++) {
+        if (tmp[to][1] == MAX_PRICE) {
+          to -= 1;
+          break;
+        }
+        nnm[to + base] = tmp[to][0];
+      }
+      nn_count[from][day] = to;
+    }
+  }
+}
 
 // cas od pocatku v sekundach
 struct timeval tv_start;
@@ -414,12 +496,14 @@ free(city_list);
 class Route {
 public:
   int *route;
+  int problem = -1;
   
   Route() { route = new int[region_count+1]; }
   ~Route() { delete route; }
   
   inline void copy(const Route &r2) {
     std::copy(r2.route, r2.route + region_count + 1, route);
+    problem = r2.problem;
   }
 
   inline Route(const Route& r2) {
@@ -434,11 +518,55 @@ public:
     return price;
   }
 
+  inline int real_price(int from = 1, int to = region_count) {
+    int price = 0;
+    for (int i=from-1; i<to; i++)
+      price += REAL_PRICE(route[i], route[i+1], i);
+    return price;
+  }
+
   inline void print();
   inline void short_print();
 
   void random_init();
   void greedy_init(int forward, int backward, Route *anti);
+
+  int brute_force(int n) {
+    Route bestr = *this;
+    int bestp = MAX_PRICE;
+    if (n == region_count) {
+      for (int k=0; k<siblings.count(route[0]); k++) {
+        int i = siblings.get(route[0], k);
+        int p = PRICE(route[n-1], i, n-1);
+        if (p < bestp) {
+          bestp = p;
+          bestr.copy(*this);
+          bestr.route[n] = i;
+        }
+      }
+    } else {
+      Route r2 = *this;
+      for (int i=1; i<=city_count; i++) {
+        int j;
+        for (j=0; j<n; j++) {
+          if (siblings.are_siblings(route[j], i))
+            break;
+        }
+        if (j==n)
+        {
+          r2.route[n] = i;
+          route[n] = i;
+          int p = PRICE(route[n-1], i, n-1) + r2.brute_force(n+1);
+          if (p < bestp) {
+            bestp = p;
+            bestr.copy(r2);
+          }
+        }
+      }
+    }
+    copy(bestr);
+    return bestp;
+  }
 
   // prohozeni i a j
   inline void two_swap(int i, int j);
@@ -469,6 +597,9 @@ public:
   inline int compute_two_opt(int i1, int i2, int max, int only_changes);
   int best_two_opt(int p = 0);
   int gd_two_opt(int p = 0);
+
+  int best_two_opt_nn(int price1, int breadth, int delta, int depth);
+  int gd_two_opt_nn(int p = 0, int k=NN);
 
   // prohozeni/rotace tri useku, predpoklada i < j < k
   inline void three_opt(int which, int i1, int i2, int i3);
@@ -880,6 +1011,74 @@ int Route::gd_two_opt(int p) {
   return p;
 }
 
+int Route::best_two_opt_nn(int price1, int breadth, int delta, int depth) {
+  Route route2, min_route;
+  long price2, min_price = price1;
+  int c1, c2, i, j;
+
+  // pozice mest
+  int pos[MAXN];
+  for (i=1; i<=city_count; i++)
+    pos[i] = -1;
+  for (i=0; i<region_count; i++)
+    for (int j=0; j<siblings.count(route[i]); j++)
+      pos[siblings.get(route[i], j)] = i;
+
+  // pro kazde mesto zkus odstranit hranu k naslednikovi a nahradit ji
+  // jednim z nejblizsich sousedu
+  for (i=0; i<region_count; i++) {
+    c1 = route[i];
+    int sc1 = route[i+1];
+    int p1 = PRICE(c1, sc1, i);
+    long base = i * (city_count+1) + c1 * (city_count+1) * (region_count+1);
+
+    // pro vsechny vsechny nejblizsi sousedy
+    for (j=1; j<=breadth; j++) {
+      if (j > nn_count[c1][i])
+        break;
+      c2 = nnm[base + j];
+      if (c2 == sc1)
+				continue;
+      int c2_pos = pos[c2];
+      if (c2_pos < 0)
+        continue;
+			if (c2_pos < i)
+				continue;
+      int p2 = PRICE(c1, c2, i);
+      
+      if (p2 > p1 + delta)
+				continue;
+
+      route2.copy(*this);
+      route2.two_opt(i+1, c2_pos+1);
+			
+      price2 = route2.price();
+			if (depth > 1)
+				price2 = route2.best_two_opt_nn(price2, breadth, p1 + delta - p2, depth-1);
+				//	price2 = route2.best_two_opt_nn(1, p1 + delta - p2, 0);
+			
+      if (price2 < min_price) {
+        min_price = price2;
+        min_route.copy(route2);
+      }
+    }
+  }
+  if (min_price < price1)
+    copy(min_route);
+  return min_price;
+}
+
+int Route::gd_two_opt_nn(int p, int k) {
+  if (p == 0)
+    p = price();
+  int prevp;
+  do {
+    prevp = p;
+    p = best_two_opt_nn(p, k, 0, 1);
+  } while (p < prevp && !hard_limit_passed());
+  return p;
+}
+
 void Route::three_opt(int which, int i1, int i2, int i3) {
   switch (which) {
   case 0: {
@@ -1020,13 +1219,13 @@ int Route::gd_all(int p, int until) {
 #endif
     }
 
-    r2.copy(*this); p2 = p;
-    p2 = r2.best_cut_and_paste(p2);
-    if (p2 < minp) { minr.copy(r2); minp = p2; }
-    if (hard_limit_passed()) break;
-#ifdef DEBUG
-    printf("%#6.3fs cut-and-paste, cena: %d.\n", elapsed(), p);
-#endif
+//     r2.copy(*this); p2 = p;
+//     p2 = r2.best_two_opt_nn(p2, 1, 0, 1);
+//     if (p2 < minp) { minr.copy(r2); minp = p2; }
+//     if (hard_limit_passed()) break;
+// #ifdef DEBUG
+//     printf("%#6.3fs two-opt-nn, cena: %d.\n", elapsed(), p);
+// #endif
 
     r2.copy(*this); p2 = p;
     p2 = r2.best_two_opt(p2);
@@ -1042,6 +1241,14 @@ int Route::gd_all(int p, int until) {
     if (hard_limit_passed()) break;
 #ifdef DEBUG
     printf("%#6.3fs three-opt, cena: %d.\n", elapsed(), p);
+#endif
+
+    r2.copy(*this); p2 = p;
+    p2 = r2.best_cut_and_paste(p2);
+    if (p2 < minp) { minr.copy(r2); minp = p2; }
+    if (hard_limit_passed()) break;
+#ifdef DEBUG
+    printf("%#6.3fs cut-and-paste, cena: %d.\n", elapsed(), p);
 #endif
 
     r2.copy(*this); p2 = p;
@@ -1089,7 +1296,9 @@ const int st_two_opt = 3;
 const int st_three_opt = 4;
 const int st_cut_and_paste = 5;
 const int st_brother_opt = 6;
-const int st_size = 7;
+const int st_two_swap_nn = 7;
+const int st_two_opt_nn = 8;
+const int st_size = 9;
 
 int random_choice(int count, int sum, ...) {
   va_list args;
@@ -1106,7 +1315,7 @@ int random_choice(int count, int sum, ...) {
   return st_none;
 }
 
-inline int choose_step(int step_type, Route r, int p, int *step_params, const int *step_type_probability)
+inline int choose_step(int step_type, Route r, int p, int *step_params, const int *step_type_probability, unsigned int step)
 {
   int p2;
 
@@ -1135,6 +1344,36 @@ inline int choose_step(int step_type, Route r, int p, int *step_params, const in
     p2 = r.price_after_brother_opt(step_params[0], step_params[1], p);
     break;
       
+  case st_two_swap_nn:
+  case st_two_opt_nn:
+    do {
+      int i = step_params[0] = rand_one_to_reg_minus_one();
+      int cnt = nn_count[r.route[i-1]][i-1];
+      if (cnt == 0)
+        continue;
+      int nnm_index = r.route[i-1] * (region_count+1) * (city_count+1)
+        + (i-1) * (city_count+1) + rand_int(cnt) + 1;
+      int c = nnm[nnm_index];
+      if (c == 0)
+        continue;  // todo: proc toto?
+      if (step_type == st_two_swap_nn && REAL_PRICE(c, r.route[i+1], i) == MAX_PRICE)
+        continue;
+      int j;
+      for (j=1; j<=region_count; j++)
+        if (siblings.are_siblings(c, r.route[j]))
+          break;
+      if (step_type == st_two_opt_nn && j < step_params[0])
+        continue;
+      step_params[1] = j;
+      if (step_params[1] < region_count)
+        break;
+    } while (1);
+    if (step_type == st_two_swap_nn)
+      p2 = r.price_after_two_swap(step_params[0], step_params[1], p);
+    else
+      p2 = r.price_after_two_opt(step_params[0], step_params[1], p, p + MAX_PRICE);
+    break;
+
   case st_two_swap:
   case st_three_swap:
   case st_two_opt:
@@ -1146,9 +1385,12 @@ inline int choose_step(int step_type, Route r, int p, int *step_params, const in
     for (int i=0; i<indices; i++) {
       int leave;
       do {
-        if (step_type == st_two_opt || step_type == st_three_opt)
-          step_params[i] = rand_one_to_reg();
-        else
+        if (step_type == st_two_opt || step_type == st_three_opt) {
+          if (r.problem >= 0 && i == 0 && step % 4 < 2)
+            step_params[i] = r.problem + step % 4;
+          else
+            step_params[i] = rand_one_to_reg();
+        } else
           step_params[i] = rand_one_to_reg_minus_one();
         leave = 1;
         for (int j=0; j<i; j++)
@@ -1187,17 +1429,19 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
   int step_params[4];
 
 #if !defined(PARAM_STEP_TYPE)
-  step_type = random_choice(6, step_type_probability[0],
+  step_type = random_choice(8, step_type_probability[0],
                             step_type_probability[st_two_swap],      st_two_swap,
                             step_type_probability[st_three_swap],    st_three_swap,
                             step_type_probability[st_two_opt],       st_two_opt,
                             step_type_probability[st_three_opt],     st_three_opt,
                             step_type_probability[st_cut_and_paste], st_cut_and_paste,
-                            step_type_probability[st_brother_opt],   st_brother_opt);
-  p2 = choose_step(step_type, r, p, step_params, step_type_probability);
+                            step_type_probability[st_brother_opt],   st_brother_opt,
+                            step_type_probability[st_two_swap_nn],   st_two_swap_nn,
+                            step_type_probability[st_two_opt_nn],    st_two_opt_nn);
+  p2 = choose_step(step_type, r, p, step_params, step_type_probability, step);
 #elif PARAM_STEP_TYPE > 0
   step_type = PARAM_STEP_TYPE;
-  p2 = choose_step(step_type, r, p, step_params, step_type_probability);
+  p2 = choose_step(step_type, r, p, step_params, step_type_probability, step);
 #else
   // zkusime vsechny typy kroku, a vybereme ten s nejlepsim skore
   int t_step_params[st_size][4];
@@ -1205,7 +1449,7 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
   for (int t=st_two_swap; t<=st_brother_opt; t++) {
     if (t == st_three_opt)
       continue;
-    int t_p2 = choose_step(t, r, p, t_step_params[t], step_type_probability);
+    int t_p2 = choose_step(t, r, p, t_step_params[t], step_type_probability, step);
     if (t_p2 < p2) {
       std::copy(t_step_params[t], t_step_params[t] + 4 * sizeof(int), step_params);
       p2 = t_p2;
@@ -1245,8 +1489,11 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
     case st_two_opt:       r2->two_opt(step_params[0], step_params[1]); break;
     case st_three_opt:     r2->three_opt(step_params[3], step_params[0], step_params[1], step_params[2]); break;
     case st_cut_and_paste: r2->cut_and_paste(step_params[0], step_params[1]); break;
+    case st_two_swap_nn:   r2->two_swap(step_params[0], step_params[1]); break;
+    case st_two_opt_nn:    r2->two_opt(step_params[0], step_params[1]); break;
     }
     // if (r2->price() != p2) {
+    //   cout << step_params[0] << ", " << step_params[1] << endl;
     //   cout << "krok" << step << ": typ " << step_type << ": stated price " << p2 << " != real " << r2->price() << " (diff. " << p2-r2->price() << "), "
     //        << step_params[0] << ", " << step_params[1] << ", " << step_params[2] << endl;
     //   r2->short_print();
@@ -1256,6 +1503,7 @@ inline step_result_t wander_step(Route &r, int &p, Route &bestr, int &bestp,
     if (p2 < bestp) {
       bestp = p2;
       bestr.copy(*r2);
+      checkout(*r2, p2);
       if (!accepted)
         delete r2;
       return sr_enhanced;
@@ -1278,23 +1526,23 @@ inline void pressure_schedule(const float &current_time, const int &step) {
   if (time_ratio > 1.0)
     pressure_price = MAX_PRICE;
   else
-    pressure_price = exp_interpolate(time_ratio, stats_price_max, MAX_PRICE);
+    pressure_price = ceil(exp_interpolate(time_ratio, stats_price_max, MAX_PRICE));
 }
 
 const int lam_smoothing = 500;
 float last_cooling_time_ratio = 0;
 unsigned int last_so_far_accepted = 0;
 unsigned int last_so_far_enhanced = 0;
-inline void subexponential_temperature_schedule(float &temperature, const float &current_time, const unsigned int &step, const float &accept_rate, const int &so_far_accepted, const int &so_far_enhanced)
+inline void subexponential_temperature_schedule(float &temperature, const float &current_time, const unsigned int &step, const float &accept_rate, const int &so_far_accepted, const int &so_far_enhanced, int route_count)
 {
   float time_ratio = (current_time - floor(current_time / time_limit) * time_limit - wandering_started) / wandering_interval;
 
   if (last_cooling_time_ratio == 0.0)
     temperature = PARAM_STARTING_TEMPERATURE;
-  if (time_ratio - last_cooling_time_ratio >= PARAM_MIN_COOLING_TIME_RATIO
+  if ((time_ratio - last_cooling_time_ratio >= PARAM_MIN_COOLING_TIME_RATIO
       ||
       so_far_accepted - last_so_far_accepted >= PARAM_MIN_ACCEPTED
-     )
+     ) && route_count == 1)
   {
 //    if (last_so_far_enhanced == so_far_enhanced)
       temperature *= PARAM_COOLING_RATE;
@@ -1317,18 +1565,18 @@ int wander(Route *rs, int route_count) {
   int ps[route_count];
   int bestps[route_count];
   Route bestrs[route_count];
-  int step_types_cnt[st_size] = {0, 1, 1, 1, 1, 1, 1};
-  int step_types_enhanced[st_size] = {0, 3, 1, 1, 1, 1, 1};
-  int step_types_accepted[st_size] = {0, 0, 0, 0, 0, 0, 0};
+  int step_types_cnt[st_size] = {0, 1, 1, 1, 1, 1, 1, 1, 1};
+  int step_types_enhanced[st_size] = {0, 10, 4, 2, 1, 2, 3, 1, 1};
+  int step_types_accepted[st_size] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
   int step_types_probability[st_size];
-  float accept_rates[st_size] = {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5};
+  float accept_rates[st_size] = {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5};
 
   wandering_started = elapsed();
   wandering_interval = (time_limit - (wandering_started + region_count / 500.0 + 0.1));
   
   float temperature = PARAM_STARTING_TEMPERATURE;
   pressure_schedule(wandering_started, 0);
-  subexponential_temperature_schedule(temperature, wandering_started, 0, 0.5, 0, 0);
+  subexponential_temperature_schedule(temperature, wandering_started, 0, 0.5, 0, 0, route_count);
   for (int i=0; i<route_count; i++) {
     bestrs[i].copy(rs[i]);
     bestps[i] = ps[i] = rs[i].price();
@@ -1390,12 +1638,41 @@ int wander(Route *rs, int route_count) {
     step++;
     if (step % 10000 == 0) {
       float current_time = elapsed();
-      subexponential_temperature_schedule(temperature, current_time, step, accept_rates[0], step_types_accepted[0], step_types_enhanced[0]);
+      subexponential_temperature_schedule(temperature, current_time, step, accept_rates[0], step_types_accepted[0], step_types_enhanced[0], route_count);
       if (step % 50000 == 0) {
         pressure_schedule(current_time, step);
         for (int i=0; i<route_count; i++) {
           ps[i] = rs[i].price();
           bestps[i] = bestrs[i].price();
+        }
+      }
+
+      if (route_count > 1) {
+        int bestp = MAX_PRICE;
+        int best = -1;
+        for (int i=0; i<route_count; i++) {
+          int p = rs[i].real_price();
+          if (p < bestp) {
+            bestp = p;
+            best = i;
+          }
+        }
+        if (bestp < MAX_PRICE) {
+#ifdef DEBUG
+          printf("%#6.3fs nalezeno reseni pod MAX_PRICE, cena: %d.\n", elapsed(), bestp);
+#endif
+          rs[0].copy(rs[best]);
+          ps[0] = ps[best];
+          route_count = 1;
+        }
+      }
+
+      for (int i=0; i<route_count; i++) {
+        rs[i].problem = -1;
+        for (int j=0; j<region_count; j++) {
+          int p = REAL_PRICE(rs[i].route[j], rs[i].route[j+1], j);
+          if (p == MAX_PRICE)
+            rs[i].problem = j;
         }
       }
     }
@@ -1424,6 +1701,11 @@ int main() {
 
   // inicializace promennych a nacteni vstupu
   load();
+
+  create_nn_list();
+#ifdef DEBUG
+  printf("%#6.3fs vytvoren seznam NN.\n", elapsed());
+#endif
 
   // kdyz nechci zvedat skore
   //if (region_count == 10)
@@ -1454,13 +1736,22 @@ int main() {
 #ifdef DEBUG
     printf("%#6.3fs %d inicializovano, cena: %d.\n", elapsed(), i, ps[i]);
 #endif
-    if (region_count <= 50)
+//    rs[i].gd_two_opt_nn(ps[i]);
+    if (region_count <= 100)
       ps[i] = rs[i].gd_all(ps[i], MAX_PRICE);
-    else
+    else {
       ps[i] = rs[i].gd_two_swap(ps[i], MAX_PRICE);
+      ps[i] = rs[i].gd_two_opt(ps[i]);
+    }
 #ifdef DEBUG
     printf("%#6.3fs %d greedy descent, cena: %d.\n", elapsed(), i, ps[i]);
 #endif
+    if (soft_limit_passed()) {
+#ifdef DEBUG
+      printf("%#6.3fs dosel cas, koncime.\n", elapsed());
+#endif
+      break;
+    }
   }
 
   // nechame jen nejlepsi
@@ -1470,23 +1761,23 @@ int main() {
     if (ps[i] < ps[best])
       best = i;
   }
-  rs[0].copy(rs[best]);
-  ps[0] = ps[best];
-  route_count = 1;
+  if (ps[best] < MAX_PRICE) {
+    rs[0].copy(rs[best]);
+    ps[0] = ps[best];
+    route_count = 1;
+  } else {
+    route_count = 2;
+  }
 
-  // sjedeme do minima pomoci cehokoli, co se da
   for (int i=0; i<route_count; i++) {
-    int p = rs[i].gd_all(ps[i], MAX_PRICE);
+    // sjedeme do minima pomoci cehokoli, co se da
+    if (region_count > 100) {
+      ps[i] = rs[i].gd_all(ps[i], MAX_PRICE);
 #ifdef DEBUG
-    printf("%#6.3fs %d greedy descent, cena: %d.\n", elapsed(), i, p);
+      printf("%#6.3fs %d greedy descent, cena: %d.\n", elapsed(), i, ps[i]);
 #endif
-    checkout(rs[i], p);
-    if (soft_limit_passed()) {
-#ifdef DEBUG
-      printf("%#6.3fs dosel cas, koncime.\n", elapsed());
-#endif
-      break;
     }
+    checkout(rs[i], ps[i]);
   }
 
   // zihani
